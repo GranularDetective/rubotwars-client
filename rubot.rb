@@ -9,8 +9,10 @@ class Rubot
     @server = 'ws://localhost:3000/cable/'
     @channel_id = { channel: 'MatchChannel' }.to_json
     @client_key = SecureRandom.base64
+    @bot_thread = nil
+    @response_queue = []
+    trap('INT') { EM.stop }
     EM.run do
-      @response_queue = EM::Queue.new
       @send_queue = EM::Queue.new
       start_client
     end
@@ -28,30 +30,35 @@ class Rubot
   end
 
   def scan
+    puts 'Scanning'
     send(action: 'scan')
     wait_for_response
   end
 
   def turn(direction)
+    puts "Turn #{direction.to_s}"
     send(action: 'turn', direction: direction)
     wait_for_response
   end
 
   def move_forward
+    puts 'Move forward'
     send(action: 'move_forward')
     wait_for_response
   end
 
   def fire
+    puts 'Fire!'
     send(action: 'fire')
     wait_for_response
   end
 
   private
-
-  # A way to block this untill there is a response?!
   def wait_for_response
-    @response_queue.pop(proc { |data| return data })
+    loop do
+      break if @response_queue.any?
+    end
+    @response_queue.pop
   end
 
   def send(data)
@@ -62,8 +69,8 @@ class Rubot
     ws = Faye::WebSocket::Client.new(@server, nil, headers: { 'user-key' => @client_key, 'user-name' => @name })
 
     send_data = proc do |data|
-      p "Sending #{data.inspect} "
       ws.send({ command: 'message', identifier: @channel_id, data: data.to_json }.to_json)
+      EM.next_tick { @send_queue.pop(&send_data) }
     end
     @send_queue.pop(&send_data)
 
@@ -77,9 +84,9 @@ class Rubot
       if data.key?('message') && data['message'].is_a?(Hash) && data['message'].key?('action')
         case data['message']['action']
         when 'start'
-          bot_loop
+          @bot_thread = Thread.new { loop { bot_loop } }
         when 'response'
-          @response_queue.push(data['message']['result'])
+          @response_queue << data['message']['result']
         else
           p "Unknown action: #{data['message']['action']}"
         end
@@ -87,7 +94,7 @@ class Rubot
     end
 
     ws.on :close do
-      EM.cancel_timer(send_loop)
+      @bot_thread.exit
       ws = nil
     end
   end
