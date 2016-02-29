@@ -84,6 +84,8 @@ class Rubot
       if data.key?('message') && data['message'].is_a?(Hash) && data['message'].key?('action')
         case data['message']['action']
         when 'start'
+          puts 'Starting'
+          sleep 2
           @bot_thread = Thread.new { loop { bot_loop } }
         when 'response'
           @response_queue << data['message']['result']
