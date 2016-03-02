@@ -54,9 +54,11 @@ class Rubot
   end
 
   private
+
   def wait_for_response
     loop do
       break if @response_queue.any?
+      sleep 0.5
     end
     @response_queue.pop
   end
@@ -85,8 +87,15 @@ class Rubot
         case data['message']['action']
         when 'start'
           puts 'Starting'
-          sleep 2
-          @bot_thread = Thread.new { loop { bot_loop } }
+          @bot_thread = Thread.new do
+            loop do
+              begin
+                bot_loop
+              rescue Excpetion => e
+                p e
+              end
+            end
+          end
         when 'response'
           @response_queue << data['message']['result']
         else
