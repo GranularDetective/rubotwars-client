@@ -25,7 +25,7 @@ class Rubot
     when 'empty'
       move_forward
     else
-      turn(:left)
+      turn([:left, :right].sample)
     end
   end
 
