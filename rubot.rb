@@ -57,6 +57,7 @@ class Rubot
 
   def wait_for_response
     loop do
+      puts "Checking for response"
       break if @response_queue.any?
       sleep 0.5
     end
@@ -84,6 +85,7 @@ class Rubot
     ws.on :message do |event|
       data = JSON.parse(event.data)
       if data.key?('message') && data['message'].is_a?(Hash) && data['message'].key?('action')
+        ws.send({ command: 'message', identifier: @channel_id, data: { action: 'acknowledge'}.to_json }.to_json)
         case data['message']['action']
         when 'start'
           puts 'Starting'
