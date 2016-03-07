@@ -4,14 +4,18 @@ require 'json'
 require 'securerandom'
 
 class Rubot
-  def initialize
-    @name = 'AnonyBot'
-    @server = 'ws://localhost:3000/cable/'
-    @channel_id = { channel: 'MatchChannel' }.to_json
+  def initialize(name, server)
+    @name = name
+    @server = server
     @client_key = SecureRandom.base64
     @bot_thread = nil
     @response_queue = []
-    trap('INT') { EM.stop }
+
+    trap('INT') do
+      @bot_thread.exit
+      EM.stop
+    end
+
     EM.run do
       @send_queue = EM::Queue.new
       start_client
@@ -19,14 +23,7 @@ class Rubot
   end
 
   def bot_loop
-    case scan
-    when 'enemy'
-      fire
-    when 'empty'
-      move_forward
-    else
-      turn([:left, :right].sample)
-    end
+    fail 'Need to overwrite bot_loop!'
   end
 
   def scan
@@ -55,53 +52,55 @@ class Rubot
 
   private
 
+  def start
+    @bot_thread = Thread.new do
+      loop do
+        bot_loop
+      end
+    end
+  end
+
   def wait_for_response
     loop do
-      puts "Checking for response"
       break if @response_queue.any?
-      sleep 0.5
     end
     @response_queue.pop
   end
 
   def send(data)
+    loop do
+      break if @send_queue.empty?
+    end
     @send_queue.push(data)
   end
 
   def start_client
     ws = Faye::WebSocket::Client.new(@server, nil, headers: { 'user-key' => @client_key, 'user-name' => @name })
+    channel_id = { channel: 'MatchChannel' }.to_json
 
     send_data = proc do |data|
-      ws.send({ command: 'message', identifier: @channel_id, data: data.to_json }.to_json)
+      ws.send({ command: 'message', identifier: channel_id, data: data.to_json }.to_json)
       EM.next_tick { @send_queue.pop(&send_data) }
     end
     @send_queue.pop(&send_data)
 
     ws.on :open do
       payload = { name: @name }.to_json
-      ws.send({ command: 'subscribe', identifier: @channel_id, data: payload }.to_json)
+      ws.send({ command: 'subscribe', identifier: channel_id, data: payload }.to_json)
     end
 
     ws.on :message do |event|
       data = JSON.parse(event.data)
       if data.key?('message') && data['message'].is_a?(Hash) && data['message'].key?('action')
-        ws.send({ command: 'message', identifier: @channel_id, data: { action: 'acknowledge'}.to_json }.to_json)
         case data['message']['action']
         when 'start'
           puts 'Starting'
-          @bot_thread = Thread.new do
-            loop do
-              begin
-                bot_loop
-              rescue Excpetion => e
-                p e
-              end
-            end
-          end
+          start
         when 'response'
+          send(action: 'acknowledge', acknowledge_key: data['message']['acknowledge_key'])
           @response_queue << data['message']['result']
         else
-          p "Unknown action: #{data['message']['action']}"
+          puts "Unknown action: #{data['message']['action']}"
         end
       end
     end
@@ -109,10 +108,8 @@ class Rubot
     ws.on :close do
       @bot_thread.exit
       ws = nil
+      EM.stop
     end
   end
 
 end
-
-
-Rubot.new
